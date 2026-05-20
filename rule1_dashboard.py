@@ -23,11 +23,30 @@ def ensure(pkg, name=None):
 ensure("yfinance")
 ensure("pandas")
 ensure("numpy")
+ensure("requests")
 
 warnings.filterwarnings("ignore")
+import requests
 import yfinance as yf
 import pandas as pd
 import numpy as np
+
+# Prime a browser-like session so Yahoo Finance accepts requests from cloud IPs
+_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/124.0.0.0 Safari/537.36"
+    ),
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.9",
+}
+_session = requests.Session()
+_session.headers.update(_HEADERS)
+try:
+    _session.get("https://finance.yahoo.com", timeout=10)
+except Exception:
+    pass
 
 PORT = int(os.environ.get("PORT", 8080))
 
@@ -85,7 +104,7 @@ def get_row(df, *keys):
 # ─────────────────────────────────────────────────────────────────
 
 def analyze(sym):
-    tk = yf.Ticker(sym)
+    tk = yf.Ticker(sym, session=_session)
     info = tk.info or {}
 
     # ── Basic info ──────────────────────────────────────────────
