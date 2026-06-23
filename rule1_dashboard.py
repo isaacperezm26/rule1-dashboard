@@ -7,46 +7,49 @@
 ╚══════════════════════════════════════════════════════╝
 """
 
-import sys, os, json, math, threading, webbrowser
+import sys, os, json, math, time, threading, webbrowser
 import subprocess, importlib, warnings
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs
+
+# Older yfinance talks to Yahoo with plain `requests`, which Yahoo quickly
+# throttles with "Too Many Requests" (HTTP 429). 0.2.60+ uses curl_cffi to
+# impersonate a real Chrome browser, which is what stops the rate limiting.
+MIN_YF = (0, 2, 60)
 
 def ensure(pkg, name=None):
     try:
         importlib.import_module(name or pkg)
     except ImportError:
-        print(f"  Installing {pkg}...")
+        print(f"  Installing {pkg}…")
         subprocess.check_call([sys.executable, "-m", "pip", "install", pkg, "-q"],
                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
-ensure("yfinance")
 ensure("pandas")
 ensure("numpy")
-ensure("requests")
+
+def ensure_yfinance():
+    """Import yfinance, upgrading it first if it's too old to dodge rate limits."""
+    try:
+        import yfinance as yf
+        ver = tuple(int(p) for p in yf.__version__.split(".")[:3])
+        if ver >= MIN_YF:
+            return yf
+    except Exception:
+        pass
+    print("  Updating yfinance for reliable Yahoo Finance access…")
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "-q", "--upgrade", "yfinance>=1.2.0"],
+                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    # If an old yfinance was already imported, re-exec so the new one loads clean.
+    if "yfinance" in sys.modules:
+        os.execv(sys.executable, [sys.executable] + sys.argv)
+    import yfinance as yf
+    return yf
 
 warnings.filterwarnings("ignore")
-import requests
-import yfinance as yf
+yf = ensure_yfinance()
 import pandas as pd
 import numpy as np
-
-# Prime a browser-like session so Yahoo Finance accepts requests from cloud IPs
-_HEADERS = {
-    "User-Agent": (
-        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/124.0.0.0 Safari/537.36"
-    ),
-    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-    "Accept-Language": "en-US,en;q=0.9",
-}
-_session = requests.Session()
-_session.headers.update(_HEADERS)
-try:
-    _session.get("https://finance.yahoo.com", timeout=10)
-except Exception:
-    pass
 
 PORT = int(os.environ.get("PORT", 8080))
 
@@ -104,7 +107,7 @@ def get_row(df, *keys):
 # ─────────────────────────────────────────────────────────────────
 
 def analyze(sym):
-    tk = yf.Ticker(sym, session=_session)
+    tk = yf.Ticker(sym)
     info = tk.info or {}
 
     # ── Basic info ──────────────────────────────────────────────
@@ -1064,6 +1067,31 @@ function renderTechnical(tech, price) {
 #  HTTP SERVER
 # ─────────────────────────────────────────────────────────────────
 
+# Cache recent analyses so re-checking a ticker (or clicking the quick buttons)
+# doesn't hit Yahoo again, and retry briefly if a request is rate-limited.
+_CACHE = {}
+_CACHE_TTL = 600  # seconds
+
+def _is_rate_limit(err):
+    m = str(err).lower()
+    return "too many" in m or "rate limit" in m or "rate-limit" in m or "429" in m
+
+def analyze_cached(sym):
+    hit = _CACHE.get(sym)
+    if hit and time.time() - hit[0] < _CACHE_TTL:
+        return hit[1]
+    for attempt in range(3):
+        try:
+            result = analyze(sym)
+            _CACHE[sym] = (time.time(), result)
+            return result
+        except Exception as e:
+            if _is_rate_limit(e) and attempt < 2:
+                time.sleep(1.5 * (attempt + 1))  # back off, then retry
+                continue
+            raise
+
+
 class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         parsed = urlparse(self.path)
@@ -1079,13 +1107,15 @@ class Handler(BaseHTTPRequestHandler):
                 return
             try:
                 print(f"  Analyzing {ticker}…", flush=True)
-                data = analyze(ticker)
+                data = analyze_cached(ticker)
                 payload = json.dumps(clean_for_json(data), allow_nan=False)
                 self._send(200, "application/json", payload.encode())
                 print(f"  ✓ {ticker} done", flush=True)
             except Exception as e:
                 print(f"  ✗ Error: {e}", flush=True)
-                self._send(500, "application/json", json.dumps({"error": str(e)}).encode())
+                msg = ("Yahoo Finance is rate-limiting requests right now. "
+                       "Wait ~30 seconds and try again.") if _is_rate_limit(e) else str(e)
+                self._send(500, "application/json", json.dumps({"error": msg}).encode())
 
         else:
             self._send(404, "text/plain", b"Not found")
