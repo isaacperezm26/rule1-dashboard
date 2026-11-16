@@ -194,7 +194,102 @@ class TestHelpers(unittest.TestCase):
         self.assertEqual(s, [105, 103, 101, 100])
 
 
+class TestVerdict(unittest.TestCase):
+    """decide_verdict(price, sticker, mos, ten_cap_ok, payback_ok, strong_fin, good_moat)"""
+    STICKER, MOS = 100.0, 50.0
+
+    def v(self, price, ten_cap, payback, fin=True, moat=True):
+        verdict, confidence, reasons = r1.decide_verdict(
+            price, self.STICKER, self.MOS, ten_cap, payback, fin, moat)
+        self.assertTrue(reasons)
+        return verdict, confidence
+
+    # ── at or below the Margin of Safety price ──
+    def test_mos_quality_and_agreement_is_strong_buy(self):
+        self.assertEqual(self.v(45, True, True), ("STRONG BUY", "High"))
+        self.assertEqual(self.v(45, True, None), ("STRONG BUY", "High"))
+        self.assertEqual(self.v(45, None, None), ("STRONG BUY", "High"))   # no result ≠ disagreement
+
+    def test_mos_quality_but_disagreement_holds_back_strong_buy(self):
+        self.assertEqual(self.v(45, False, True), ("BUY", "Medium"))
+        self.assertEqual(self.v(45, False, False), ("BUY", "Medium"))
+
+    def test_mos_with_one_quality_score(self):
+        self.assertEqual(self.v(45, True, True, moat=False), ("BUY", "Medium"))
+        self.assertEqual(self.v(45, None, None, fin=False), ("BUY", "Medium"))
+        self.assertEqual(self.v(45, False, None, moat=False), ("BUY", "Low"))
+
+    def test_other_methods_never_buy_a_poor_business(self):
+        self.assertEqual(self.v(45, True, True, fin=False, moat=False), ("WATCHLIST", "Low"))
+
+    # ── between MOS and Sticker ──
+    def test_below_sticker_is_watchlist_with_confidence_from_other_methods(self):
+        self.assertEqual(self.v(80, True, True), ("WATCHLIST", "High"))
+        self.assertEqual(self.v(80, True, None), ("WATCHLIST", "High"))
+        self.assertEqual(self.v(80, True, False), ("WATCHLIST", "Medium"))
+        self.assertEqual(self.v(80, None, None), ("WATCHLIST", "Medium"))
+        self.assertEqual(self.v(80, False, False), ("WATCHLIST", "Low"))
+        self.assertEqual(self.v(80, None, False), ("WATCHLIST", "Low"))
+
+    # ── above Sticker ──
+    def test_above_sticker_lifted_only_by_both_methods_or_a_near_miss(self):
+        self.assertEqual(self.v(300, True, True), ("WATCHLIST", "Low"))      # both pass
+        self.assertEqual(self.v(115, True, False), ("WATCHLIST", "Low"))     # within 20% + one passes
+        self.assertEqual(self.v(115, True, None), ("WATCHLIST", "Low"))
+        self.assertEqual(self.v(125, True, False), ("AVOID / WAIT", "Medium"))   # not near, only one
+        self.assertEqual(self.v(115, None, None), ("AVOID / WAIT", "Medium"))    # near, nothing agrees
+        self.assertEqual(self.v(115, False, False), ("AVOID / WAIT", "High"))
+        self.assertEqual(self.v(300, False, None), ("AVOID / WAIT", "High"))
+
+    def test_other_methods_alone_never_produce_a_buy(self):
+        for price in (51, 80, 115, 300):
+            for fin in (True, False):
+                for moat in (True, False):
+                    verdict, _ = self.v(price, True, True, fin=fin, moat=moat)
+                    self.assertNotIn("BUY", verdict, (price, fin, moat))
+
+
 class TestAnalysis(AnalysisCase):
+    def test_verdict_lists_each_method(self):
+        d = self.run_analysis()                       # price 300 vs sticker ~113
+        m = {x["name"]: x["result"] for x in d["verdict"]["methods"]}
+        self.assertEqual(m, {"Margin of Safety": "fail", "Ten Cap": "fail", "Payback Time": "fail"})
+        self.assertEqual((d["verdict"]["verdict"], d["verdict"]["confidence"]), ("AVOID / WAIT", "High"))
+
+    def test_both_other_methods_passing_lifts_to_watchlist(self):
+        # Trades at ~6x earnings: above its (P/E-capped) Sticker Price, but
+        # owner earnings and free cash flow say it is cheap.
+        d = self.run_analysis(hist=price_history(30.0, 45.0),
+                              info=base_info(currentPrice=45.0, previousClose=44.5,
+                                             marketCap=45.0 * 14.7 * B, trailingPE=5.6))
+        self.assertGreater(45.0, d["valuation"]["sticker_price"])
+        m = {x["name"]: x["result"] for x in d["verdict"]["methods"]}
+        self.assertEqual(m, {"Margin of Safety": "fail", "Ten Cap": "pass", "Payback Time": "pass"})
+        self.assertEqual((d["verdict"]["verdict"], d["verdict"]["confidence"]), ("WATCHLIST", "Low"))
+
+    def test_methods_without_a_result_are_not_counted(self):
+        # No exchange rate → Ten Cap and Payback can't be compared with the price.
+        d = self.run_analysis(info=base_info(financialCurrency="TWD"))
+        m = {x["name"]: x["result"] for x in d["verdict"]["methods"]}
+        self.assertEqual(m["Ten Cap"], "na")
+        self.assertEqual(m["Payback Time"], "na")
+        self.assertEqual((d["verdict"]["verdict"], d["verdict"]["confidence"]), ("AVOID / WAIT", "Medium"))
+        # Negative free cash flow is "no result" for Payback Time, not a fail.
+        cf = base_cf(**{"Free Cash Flow": [5 * B, 2 * B, -1 * B, -4 * B]})
+        m = {x["name"]: x["result"] for x in self.run_analysis(cf=cf)["verdict"]["methods"]}
+        self.assertEqual(m["Payback Time"], "na")
+
+    def test_no_sticker_price_is_never_overridden(self):
+        inc = base_inc(**{"Diluted EPS": [0.33, 0.13, -0.2, -0.53]})
+        d = self.run_analysis(inc=inc, hist=price_history(30.0, 45.0),
+                              info=base_info(currentPrice=45.0, marketCap=45.0 * 14.7 * B,
+                                             trailingEps=-0.53, trailingPE=None))
+        m = {x["name"]: x["result"] for x in d["verdict"]["methods"]}
+        self.assertEqual(m["Margin of Safety"], "na")
+        self.assertEqual(m["Ten Cap"], "pass")
+        self.assertEqual(d["verdict"]["verdict"], "AVOID / WAIT")
+        self.assertIn("does not buy without a Sticker Price", " ".join(d["verdict"]["reasons"]))
+
     def test_payload_is_strict_json(self):
         d = self.run_analysis()
         json.dumps(r1.clean_for_json(d), allow_nan=False)

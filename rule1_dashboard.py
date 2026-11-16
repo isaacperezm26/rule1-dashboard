@@ -58,6 +58,7 @@ MAX_GROWTH      = 0.15   # cap on the growth rate fed into the Sticker Price
 MAX_FUTURE_PE   = 50
 BIG5_TARGET     = 0.10   # every Big 5 number should be ≥ 10% a year
 PAYBACK_TARGET  = 8      # years
+NEAR_MISS       = 0.20   # "close to the Sticker Price" = within 20% above it
 
 # ─────────────────────────────────────────────────────────────────
 #  DATA HELPERS
@@ -306,6 +307,87 @@ def to_score(parts):
     if len(got) < 2:
         return None
     return max(1, round(10 * sum(got) / (2 * len(got))))
+
+def _join(names):
+    return " and ".join(names)
+
+def decide_verdict(price, sticker_price, mos_price, ten_cap_ok, payback_ok,
+                   strong_fin, good_moat):
+    """Combine the three valuation methods into ``(verdict, confidence, reasons)``.
+
+    ``ten_cap_ok`` / ``payback_ok`` are True (passes), False (fails) or None
+    (the method produced no result — never counted either way).
+
+    The Margin of Safety price is the buy test and the quality scores gate
+    BUY / STRONG BUY. Ten Cap and Payback Time are second opinions: agreement
+    raises confidence, disagreement lowers it (and holds back a STRONG BUY),
+    and they can put an expensive-on-Sticker stock on the watchlist — but they
+    can never produce a buy on their own.
+    """
+    others  = {"Ten Cap": ten_cap_ok, "Payback Time": payback_ok}
+    passed  = [nm for nm, ok in others.items() if ok is True]
+    failed  = [nm for nm, ok in others.items() if ok is False]
+    quality = int(bool(strong_fin)) + int(bool(good_moat))
+    q_text  = ("The business scores 7+ on both moat and financial health." if quality == 2
+               else "The business scores 7+ on only one of moat and financial health." if quality == 1
+               else "The business scores below 7 on both moat and financial health.")
+    agree    = f"{_join(passed)} {'pass' if len(passed) > 1 else 'passes'}" if passed else None
+    disagree = f"{_join(failed)} {'fail' if len(failed) > 1 else 'fails'}" if failed else None
+    reasons  = []
+
+    if price <= mos_price:
+        reasons += ["Price is at or below the Margin of Safety price.", q_text]
+        if quality == 2 and not failed:
+            verdict, confidence = "STRONG BUY", "High"
+            if agree:
+                reasons.append(f"{agree} too.")
+        elif quality == 2:
+            verdict, confidence = "BUY", "Medium"
+            reasons.append(f"{disagree}, which holds this back from a Strong Buy.")
+        elif quality == 1:
+            verdict, confidence = "BUY", ("Low" if failed else "Medium")
+            if disagree:
+                reasons.append(f"{disagree}, lowering confidence.")
+            elif agree:
+                reasons.append(f"{agree} too.")
+        else:
+            verdict, confidence = "WATCHLIST", "Low"
+            reasons.append("It is cheap, but Rule #1 only buys wonderful businesses.")
+    elif price <= sticker_price:
+        verdict = "WATCHLIST"
+        reasons += ["Price is below the Sticker Price but not yet at the Margin of Safety price.", q_text]
+        if passed and not failed:
+            confidence = "High"
+            reasons.append(f"{agree}, raising confidence.")
+        elif failed and not passed:
+            confidence = "Low"
+            reasons.append(f"{disagree}, lowering confidence.")
+        else:
+            confidence = "Medium"
+            if passed and failed:
+                reasons.append(f"{agree}, but {disagree}.")
+    else:
+        near = price <= sticker_price * (1 + NEAR_MISS)
+        if len(passed) == 2:
+            verdict, confidence = "WATCHLIST", "Low"
+            reasons += ["Price is above the Sticker Price, but Ten Cap and Payback Time both pass, "
+                        "so it is worth watching.", q_text]
+        elif near and passed:
+            verdict, confidence = "WATCHLIST", "Low"
+            reasons += [f"Price is within {NEAR_MISS:.0%} of the Sticker Price and {agree}, "
+                        "so it is worth watching.", q_text]
+            if disagree:
+                reasons.append(f"{disagree}.")
+        else:
+            verdict = "AVOID / WAIT"
+            confidence = "High" if (failed and not passed) else "Medium"
+            reasons += ["Price is above the Sticker Price.", q_text]
+            if failed and not passed:
+                reasons.append(f"{disagree} too.")
+            elif passed:
+                reasons.append(f"{agree}, but that alone is not enough"
+                               + (f"; {disagree}." if disagree else "."))
+    return verdict, confidence, reasons
 
 # ─────────────────────────────────────────────────────────────────
 #  CORE ANALYSIS
@@ -769,6 +851,37 @@ def analyze(sym, allow_partial=False):
     is_good_moat  = moat_sc is not None and moat_sc >= 7
     reasons = []
 
+    # Each method's own answer: True = passes, False = fails, None = no result
+    # (bank cash flows, negative free cash flow, no exchange rate, missing data…).
+    ten_cap_ok = (price <= ten_cap_ps) if (price is not None and ten_cap_ps is not None) else None
+    payback_ok = None
+    if payback_yrs is not None:
+        payback_ok = payback_yrs <= PAYBACK_TARGET
+    elif payback_over:
+        payback_ok = False
+
+    def method(name, ok, detail):
+        return {"name": name, "result": "na" if ok is None else "pass" if ok else "fail", "detail": detail}
+
+    if sticker_price is not None and price is not None:
+        mos_detail = ("at or below the MOS price" if price <= mos_price
+                      else "below Sticker, above MOS" if price <= sticker_price
+                      else "above the Sticker Price")
+        mos_method = {"name": "Margin of Safety",
+                      "result": "pass" if price <= mos_price else "near" if price <= sticker_price else "fail",
+                      "detail": mos_detail}
+    else:
+        mos_method = method("Margin of Safety", None, "no Sticker Price")
+    methods = [
+        mos_method,
+        method("Ten Cap", ten_cap_ok,
+               "no result" if ten_cap_ok is None
+               else "price at or below Ten Cap price" if ten_cap_ok else "price above Ten Cap price"),
+        method("Payback Time", payback_ok,
+               "no result" if payback_ok is None
+               else f"{payback_yrs} years" if payback_yrs is not None else "over 30 years"),
+    ]
+
     if price is None or sticker_issue in ("no_eps", "no_growth_data"):
         verdict, confidence = "INSUFFICIENT DATA", "Low"
         reasons.append("Yahoo Finance did not return enough data to value this company.")
@@ -786,42 +899,15 @@ def analyze(sym, allow_partial=False):
         reasons.append("There is no Sticker Price because " + " and ".join(why) +
                        " — Rule #1 values a business on the lower of its historical and expected growth.")
     else:
-        q_text = ("The business scores 7+ on both moat and financial health."
-                  if (is_strong_fin and is_good_moat)
-                  else "The business scores 7+ on only one of moat and financial health."
-                  if (is_strong_fin or is_good_moat)
-                  else "The business scores below 7 on both moat and financial health.")
-        if price <= mos_price:
-            reasons.append("Price is at or below the Margin of Safety price.")
-            reasons.append(q_text)
-            if is_strong_fin and is_good_moat:
-                verdict, confidence = "STRONG BUY", "High"
-            elif is_strong_fin or is_good_moat:
-                verdict, confidence = "BUY", "Medium"
-            else:
-                verdict, confidence = "WATCHLIST", "Low"
-        elif price <= sticker_price:
-            verdict, confidence = "WATCHLIST", "Medium"
-            reasons.append("Price is below the Sticker Price but not yet at the Margin of Safety price.")
-            reasons.append(q_text)
-        else:
-            verdict, confidence = "AVOID / WAIT", "Medium"
-            reasons.append("Price is above the Sticker Price.")
-            reasons.append(q_text)
-    if sticker_issue is None and price is not None:
-        # The verdict is driven by the Sticker Price; say where the other two
-        # valuation methods agree or disagree with it.
-        others = []
-        if ten_cap_ps is not None:
-            others.append(("Ten Cap", price <= ten_cap_ps))
-        if payback_yrs is not None or payback_over:
-            others.append(("Payback Time", payback_yrs is not None and payback_yrs <= PAYBACK_TARGET))
-        passed = [nm for nm, ok in others if ok]
-        failed = [nm for nm, ok in others if not ok]
+        verdict, confidence, reasons = decide_verdict(
+            price, sticker_price, mos_price, ten_cap_ok, payback_ok, is_strong_fin, is_good_moat)
+
+    if sticker_issue in ("negative_eps", "no_growth") and price is not None:
+        # No Sticker Price means no buy, whatever the other two methods say.
+        passed = [m["name"] for m in methods[1:] if m["result"] == "pass"]
         if passed:
-            reasons.append(f"Also passes: {' and '.join(passed)}.")
-        if failed:
-            reasons.append(f"Fails: {' and '.join(failed)}.")
+            reasons.append(f"{_join(passed)} {'pass' if len(passed) > 1 else 'passes'}, "
+                           "but Rule #1 does not buy without a Sticker Price.")
     if n < 4 and n > 0:
         reasons.append(f"Only {n} fiscal year(s) of statements were available; growth rates are less reliable.")
 
@@ -902,7 +988,8 @@ def analyze(sym, allow_partial=False):
             "meaning": None, "moat": moat_sc,
             "management": None, "financial": fin_sc, "overall": overall,
         },
-        "verdict": {"verdict": verdict, "confidence": confidence, "reasons": reasons},
+        "verdict": {"verdict": verdict, "confidence": confidence, "reasons": reasons,
+                    "methods": methods},
         "notes": notes, "partial": partial,
     }
 
@@ -1009,7 +1096,13 @@ HTML = r"""<!DOCTYPE html>
   }
   .verdict-label { font-size: 28px; font-weight: 900; letter-spacing: -0.5px; }
   .verdict-sub { font-size: 13px; opacity: 0.8; }
-  .verdict-reasons { font-size: 12px; opacity: 0.75; margin-top: 6px; max-width: 460px; line-height: 1.5; }
+  .verdict-reasons { font-size: 12px; opacity: 0.75; margin-top: 6px; max-width: 520px; line-height: 1.5; }
+  .verdict-methods { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; max-width: 520px; }
+  .vm-chip { font-size: 11px; font-weight: 600; padding: 3px 10px; border-radius: 20px; border: 1px solid; white-space: nowrap; }
+  .vm-pass { color: var(--green);  background: rgba(16,185,129,0.12); border-color: rgba(16,185,129,0.3); }
+  .vm-near { color: var(--yellow); background: rgba(245,158,11,0.12); border-color: rgba(245,158,11,0.3); }
+  .vm-fail { color: var(--red);    background: rgba(239,68,68,0.12);  border-color: rgba(239,68,68,0.3); }
+  .vm-na   { color: var(--muted);  background: rgba(107,114,128,0.12); border-color: rgba(107,114,128,0.3); }
   .verdict-prices { display: flex; gap: 28px; margin-left: auto; flex-wrap: wrap; }
   .vp-item .vp-label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; opacity: 0.7; }
   .vp-item .vp-val   { font-size: 18px; font-weight: 700; margin-top: 2px; }
@@ -1170,6 +1263,7 @@ HTML = r"""<!DOCTYPE html>
         <div class="verdict-label" id="verdictLabel"></div>
         <div class="verdict-sub" id="verdictSub"></div>
         <div class="verdict-reasons" id="verdictReasons"></div>
+        <div class="verdict-methods" id="verdictMethods"></div>
       </div>
       <div class="verdict-prices">
         <div class="vp-item"><div class="vp-label">Current Price</div><div class="vp-val" id="vpCurrent"></div></div>
@@ -1398,6 +1492,17 @@ function renderVerdict(verdict, info, val) {
   $('verdictLabel').style.color = fg;
   $('verdictSub').textContent   = `Confidence: ${verdict.confidence}`;
   $('verdictReasons').textContent = (verdict.reasons || []).join(' ');
+
+  // One chip per valuation method so it's clear what drove the verdict.
+  const icon = { pass: '✓', near: '≈', fail: '✗', na: '–' };
+  const box = $('verdictMethods');
+  box.innerHTML = '';
+  (verdict.methods || []).forEach(m => {
+    const chip = document.createElement('span');
+    chip.className = 'vm-chip vm-' + m.result;
+    chip.textContent = `${icon[m.result] || ''} ${m.name}: ${m.detail}`;
+    box.appendChild(chip);
+  });
 
   $('vpCurrent').textContent = fmtP(info.price);
   $('vpSticker').textContent = fmtP(val.sticker_price);

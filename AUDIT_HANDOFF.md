@@ -5,7 +5,7 @@ _Working notes so this audit can be resumed in a later session. Not part of the 
 ## Where things stand
 
 - Branch: `claude/dashboard-audit-corrections-ad3oyc`, **pushed to GitHub** and a clean fast-forward from `main`. Not yet merged; no pull request was opened.
-- All fixes live in `rule1_dashboard.py`; offline tests in `tests/test_analysis.py` (37 tests, `python -m unittest discover -s tests -v`). `README.md` describes the corrected methods, `docs/screenshot.png` is a live AAPL run, and `.gitignore` was added.
+- All fixes live in `rule1_dashboard.py`; offline tests in `tests/test_analysis.py` (48 tests, `python -m unittest discover -s tests -v`). `README.md` describes the corrected methods, `docs/screenshot.png` is a live AAPL run, and `.gitignore` was added.
 - Verified with Python 3.13, yfinance 1.8.0, pandas 3.0.5.
 - A personal cloud environment named `rule1-dashboard` allows the Yahoo Finance hosts and the Chart.js CDN, so live data works in sessions that use it. Its setup script (`pip install -r requirements.txt`) has not yet been exercised by a fresh session.
 
@@ -36,6 +36,10 @@ UI / server
 - 50/200-day MA lines actually drawn; stale values cleared between tickers; out-of-order responses ignored; currency-aware formatting; ROIC row; notes box; disclaimer.
 - Threaded server, ticker validation, proper HTTP status codes, binds 127.0.0.1 locally, wildcard CORS header removed.
 
+## Added after the audit
+
+- Verdict now uses all three valuation methods (previously Sticker Price only), with a pass/fail chip per method in the banner. Offline tests: 48.
+
 ## Found on live data and fixed
 
 1. Analyst growth: Yahoo's long-term (`LTG`) stock estimate is blank for every ticker checked, so the code now uses the annualised two-year forward estimate (`0y` and `+1y` rows). Growth is strictly the lower of history and analysts; no Sticker Price when that is not positive.
@@ -55,7 +59,7 @@ These are readings of Rule #1, not bug fixes. Each is a small, isolated piece of
 - **Growth is strictly the lower of history and analysts**, capped at 15%. If the lower one is zero or negative there is no Sticker Price at all.
 - **Analyst growth** is the annualised two-year forward estimate, because Yahoo's long-term figure is blank.
 - **Ten Cap treats all capex as maintenance capex** (Yahoo doesn't split it), which is the conservative choice and lowers the value for heavy investors such as GOOGL and AMZN.
-- **The verdict is driven by the Sticker Price only.** Ten Cap and Payback Time are listed in the reasons as agreeing or not; they do not change the verdict.
+- **The verdict combines all three methods** (`decide_verdict()`): the Margin of Safety price is the buy test and 7+ quality scores gate BUY / STRONG BUY. Ten Cap and Payback Time raise or lower confidence, a disagreement holds back a STRONG BUY, and they lift an above-Sticker stock to WATCHLIST when both pass, or when one passes and the price is within 20% of Sticker (`NEAR_MISS`). They never produce a buy alone; a method with no result counts neither way; no Sticker Price always means AVOID / WAIT.
 - **Scores** give 2 / 1 / 0 points per metric using the same good / warn / bad bands the page colours by; a 7+ counts as passing.
 - **Meaning and Management are unscored** rather than estimated.
 
@@ -80,7 +84,7 @@ These are readings of Rule #1, not bug fixes. Each is a small, isolated piece of
 1. **Merge to `main`** (fast-forward):
    `git fetch origin && git checkout main && git merge origin/claude/dashboard-audit-corrections-ad3oyc && git push origin main`
 2. Delete this file once merged (`git rm AUDIT_HANDOFF.md`).
-3. Optional, not started: a longer history source for 10-year growth; letting Ten Cap / Payback influence the verdict; Rule #1's own technical indicators.
+3. Optional, not started: a longer history source for 10-year growth; Rule #1's own technical indicators.
 
 ## How to verify live
 
