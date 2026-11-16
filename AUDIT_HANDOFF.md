@@ -4,12 +4,12 @@ _Working notes so this audit can be resumed in a later session. Not part of the 
 
 ## Where things stand
 
-- Branch: `claude/dashboard-audit-corrections-ad3oyc`
-- All fixes live in `rule1_dashboard.py`; offline tests in `tests/test_analysis.py` (`python -m unittest discover -s tests -v`).
-- **Nothing is pushed yet.** `git push` is refused with HTTP 403: Claude's GitHub access to `isaacperezm26/rule1-dashboard` is not connected. Fix: reconnect GitHub at https://claude.ai/connect-github (and install the Claude GitHub App on the repo), then `git push -u origin claude/dashboard-audit-corrections-ad3oyc`.
-- A personal cloud environment named `rule1-dashboard` now allows the Yahoo Finance hosts and the Chart.js CDN, so live data works in sessions that use it.
+- Branch: `claude/dashboard-audit-corrections-ad3oyc`, **pushed to GitHub** and a clean fast-forward from `main`. Not yet merged; no pull request was opened.
+- All fixes live in `rule1_dashboard.py`; offline tests in `tests/test_analysis.py` (37 tests, `python -m unittest discover -s tests -v`). `README.md` describes the corrected methods, `docs/screenshot.png` is a live AAPL run, and `.gitignore` was added.
+- Verified with Python 3.13, yfinance 1.8.0, pandas 3.0.5.
+- A personal cloud environment named `rule1-dashboard` allows the Yahoo Finance hosts and the Chart.js CDN, so live data works in sessions that use it. Its setup script (`pip install -r requirements.txt`) has not yet been exercised by a fresh session.
 
-## Done (committed locally unless marked)
+## Done
 
 Valuation
 - Sticker Price: analyst growth now comes from `growth_estimates` instead of `earningsGrowth` (which is quarterly YoY); historical growth prefers book value/share, falls back to EPS; future P/E = min(2 × growth, median historical P/E); no Sticker Price for negative EPS or no positive growth (was: silent 10% default / negative prices).
@@ -47,15 +47,46 @@ UI / server
 
 Live sweep checked: AAPL, MSFT, NVDA, GOOGL, AMZN, TSLA, TSM, BRK-B, JPM, RIVN, VOD.L, SHEL.L, SPY (rejected as an ETF), and a nonexistent ticker (rejected).
 
+## Judgment calls made (change these if you disagree)
+
+These are readings of Rule #1, not bug fixes. Each is a small, isolated piece of `analyze()`; the constants are at the top of the file (`MARR`, `MOS`, `MAX_GROWTH`, `MAX_FUTURE_PE`, `BIG5_TARGET`, `PAYBACK_TARGET`).
+
+- **Historical growth** uses book value per share first, and EPS only when book value isn't growing (buyback-heavy companies).
+- **Growth is strictly the lower of history and analysts**, capped at 15%. If the lower one is zero or negative there is no Sticker Price at all.
+- **Analyst growth** is the annualised two-year forward estimate, because Yahoo's long-term figure is blank.
+- **Ten Cap treats all capex as maintenance capex** (Yahoo doesn't split it), which is the conservative choice and lowers the value for heavy investors such as GOOGL and AMZN.
+- **The verdict is driven by the Sticker Price only.** Ten Cap and Payback Time are listed in the reasons as agreeing or not; they do not change the verdict.
+- **Scores** give 2 / 1 / 0 points per metric using the same good / warn / bad bands the page colours by; a 7+ counts as passing.
+- **Meaning and Management are unscored** rather than estimated.
+
+## Looked at and deliberately left alone
+
+- Technical timing uses 50/200-day moving averages. Rule #1 itself uses MACD, stochastics and a 10-day average; switching would be a redesign, not a correction.
+- "Golden cross" is reported as a state (50-day above 200-day), not as the crossing event; the label now says so.
+- The single-file, no-framework design and the auto-install of dependencies on first run.
+
+## Known limitations
+
+- **Short history.** Yahoo supplies about four fiscal years, so growth rates are 3-year and the historical P/E is a median of about four points. Rule #1 prefers a 10-year record.
+- **Currency conversion uses today's exchange rate for every year.** Growth rates are unaffected, but older years' converted amounts are not what they were worth at the time.
+- **Share-count restatement is a heuristic.** A jump of more than 1.5× between years, or a statement count far from market cap ÷ price, is treated as a split or ADR ratio. A company that genuinely issued that many shares would be misread.
+- **Interest expense is often missing** from Yahoo (AAPL shows N/A for interest coverage); it is left out of the score rather than guessed.
+- **Earnings-based valuation doesn't suit every company**: banks and insurers (noted on the page), and holding companies like BRK-B whose EPS swings with investment gains.
+- **Pence-quoted loss-makers:** trailing EPS units can't be cross-checked against a P/E, so pounds are assumed.
+- **Partial results:** if Yahoo is still throttling after three tries, the page shows a labelled partial analysis without analyst estimates or trailing EPS.
+
 ## Still to do
 
-1. **Push the branch** once GitHub access is fixed (see above). All work is committed locally only.
-2. Delete this file after the branch is pushed / merged.
-3. Optional follow-ups, not done: Yahoo only provides about four fiscal years, so growth rates are 3-year, not the 10-year record Rule #1 prefers; interest expense is often missing from Yahoo (AAPL shows N/A for interest coverage); `trailingEps` units for pence-quoted loss-makers can't be cross-checked against a P/E.
+1. **Merge to `main`** (fast-forward):
+   `git fetch origin && git checkout main && git merge origin/claude/dashboard-audit-corrections-ad3oyc && git push origin main`
+2. Delete this file once merged (`git rm AUDIT_HANDOFF.md`).
+3. Optional, not started: a longer history source for 10-year growth; letting Ten Cap / Payback influence the verdict; Rule #1's own technical indicators.
 
 ## How to verify live
 
 ```bash
-python3 rule1_dashboard.py      # then open http://localhost:8080
 python -m unittest discover -s tests -v
+python3 rule1_dashboard.py      # then open http://localhost:8080
 ```
+
+The tests replace Yahoo with in-memory fixtures (`FakeTicker` in `tests/test_analysis.py`), so they run offline. For a live check, try AAPL, GOOGL (multi-class shares), TSM (ADR, TWD statements), VOD.L (pence), JPM (bank), RIVN (losses), SPY and a made-up ticker (both should be rejected). The page loads Chart.js from cdn.jsdelivr.net, so the chart needs internet access.
