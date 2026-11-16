@@ -368,10 +368,15 @@ class TestAnalysis(AnalysisCase):
         eight = sum(98.8 * B * (1 + g) ** y for y in range(1, 9))
         self.assertAlmostEqual(v["payback_price"], eight / (14.7 * B), places=4)
 
-    def test_placeholder_scores_are_gone(self):
+    def test_meaning_and_management_are_scored_from_data(self):
         s = self.run_analysis()["scores"]
-        self.assertIsNone(s["meaning"])
-        self.assertIsNone(s["management"])
+        self.assertTrue(1 <= s["meaning"] <= 10)
+        self.assertTrue(1 <= s["management"] <= 10)
+        self.assertNotEqual((s["meaning"], s["management"]), (7, 7))
+        self.assertEqual(len(s["details"]["meaning"]), 4)
+        self.assertEqual(len(s["details"]["management"]), 5)
+        for c in s["details"]["meaning"] + s["details"]["management"]:
+            self.assertIn(c["points"], (0, 1, 2, None))
         self.assertTrue(1 <= s["moat"] <= 10)
         self.assertTrue(1 <= s["financial"] <= 10)
 

@@ -311,6 +311,22 @@ def to_score(parts):
 def _join(names):
     return " and ".join(names)
 
+def share_of(flags, good=0.75, warn=0.5):
+    """2 / 1 / 0 points for the share of True values; None with < 2 values."""
+    got = [f for f in flags if f is not None]
+    if len(got) < 2:
+        return None, None
+    frac = sum(got) / len(got)
+    return (2 if frac >= good else 1 if frac >= warn else 0), f"{sum(got)} of {len(got)}"
+
+def year_over_year(vals):
+    """True/False per consecutive pair of known values: did it rise?"""
+    known = [v for v in vals if v is not None]
+    return [b > a for a, b in zip(known, known[1:])]
+
+def check(label, pts, value):
+    return {"label": label, "points": pts, "value": value if pts is not None else "no data"}
+
 def decide_verdict(price, sticker_price, mos_price, ten_cap_ok, payback_ok,
                    strong_fin, good_moat):
     """Combine the three valuation methods into ``(verdict, confidence, reasons)``.
@@ -843,7 +859,56 @@ def analyze(sym, allow_partial=False):
         tier(profit_margin, 0.10, 0.05), cov_pts,
     ])
 
-    quant = [s for s in (moat_sc, fin_sc) if s is not None]
+    # Meaning = is this a predictable business you can understand? Measured by
+    # how consistently it has grown and made money over the available history.
+    def pct(v): return f"{v * 100:.1f}%"
+    rev_pts, rev_txt = share_of(year_over_year(revenues))
+    eps_pts, eps_txt = share_of(year_over_year(eps_vals))
+    ni_pts,  ni_txt  = share_of([v > 0 for v in net_inc if v is not None], good=1.0, warn=0.75)
+    fcf_pts, fcf_txt = share_of([v > 0 for v in fcf if v is not None], good=1.0, warn=0.75)
+    meaning_checks = [
+        check("Sales rose year over year", rev_pts, f"{rev_txt} years"),
+        check("EPS rose year over year", eps_pts, f"{eps_txt} years"),
+        check("Profitable every year", ni_pts, f"{ni_txt} years"),
+        check("Positive free cash flow every year", fcf_pts, f"{fcf_txt} years"),
+    ]
+    meaning_sc = to_score([c["points"] for c in meaning_checks])
+
+    # Management = are the people running it good stewards of owners' money?
+    # Returns on equity, ability to pay off debt, dilution, insider ownership
+    # and Yahoo's (ISS) governance risk rating.
+    if debt_free:
+        debt_pts, debt_txt = 2, "no debt"
+    elif dbt_now is not None and fcf_now is not None:
+        if fcf_now > 0:
+            yrs = dbt_now / fcf_now
+            debt_pts, debt_txt = tier_inv(yrs, 3, 5), f"{yrs:.1f} years of FCF"
+        else:
+            debt_pts, debt_txt = 0, "debt with negative FCF"
+    else:
+        debt_pts, debt_txt = None, None
+
+    share_hist = dil_shares if sum(v is not None for v in dil_shares) >= 2 else ord_shares
+    sh_growth, _ = cagr(share_hist, periods)
+    sh_pts = tier_inv(sh_growth, 0.0, 0.02)
+    sh_txt = None if sh_growth is None else (
+        f"shrinking {pct(-sh_growth)}/yr" if sh_growth < 0 else f"growing {pct(sh_growth)}/yr")
+
+    insiders = to_f(info.get("heldPercentInsiders"))
+    gov_risk = to_f(info.get("overallRisk"))
+    mgmt_checks = [
+        check("Return on equity ≥ 10%", 0 if neg_equity else tier(roe, 0.10, 0.05),
+              "negative equity" if neg_equity else pct(roe) if roe is not None else None),
+        check("Debt payable from ≤ 3 years of FCF", debt_pts, debt_txt),
+        check("Not diluting shareholders", sh_pts, sh_txt),
+        check("Insiders own shares", tier(insiders, 0.05, 0.01),
+              pct(insiders) if insiders is not None else None),
+        check("Low governance risk (1 = best, 10 = worst)", tier_inv(gov_risk, 3, 6),
+              f"{gov_risk:.0f} / 10" if gov_risk is not None else None),
+    ]
+    mgmt_sc = to_score([c["points"] for c in mgmt_checks])
+
+    quant = [s for s in (meaning_sc, moat_sc, mgmt_sc, fin_sc) if s is not None]
     overall = round(sum(quant) / len(quant)) if quant else None
 
     # ── Verdict ─────────────────────────────────────────────────
@@ -983,10 +1048,9 @@ def analyze(sym, allow_partial=False):
             "52w_high": high52, "52w_low": low52,
         },
         "scores": {
-            # Meaning and Management are qualitative judgments that can't be
-            # computed from financial data, so they are deliberately unscored.
-            "meaning": None, "moat": moat_sc,
-            "management": None, "financial": fin_sc, "overall": overall,
+            "meaning": meaning_sc, "moat": moat_sc,
+            "management": mgmt_sc, "financial": fin_sc, "overall": overall,
+            "details": {"meaning": meaning_checks, "management": mgmt_checks},
         },
         "verdict": {"verdict": verdict, "confidence": confidence, "reasons": reasons,
                     "methods": methods},
@@ -1142,6 +1206,9 @@ HTML = r"""<!DOCTYPE html>
   }
   .score-name { font-size: 12px; color: var(--muted); font-weight: 500; }
   .score-hint { font-size: 11px; color: var(--muted); opacity: 0.8; margin-top: 6px; line-height: 1.4; }
+  .score-checks { list-style: none; margin: 10px 0 0; padding: 0; text-align: left; font-size: 11px; line-height: 1.5; color: var(--muted); }
+  .score-checks li { margin-top: 3px; }
+  .score-check-val { display: block; padding-left: 14px; opacity: 0.75; }
 
   /* ── Big 5 table ── */
   .big5-table { width: 100%; border-collapse: collapse; font-size: 12px; }
@@ -1532,20 +1599,26 @@ function renderNotes(notes) {
 
 function renderScores(scores) {
   const items = [
-    { key: 'meaning',    label: 'Meaning',    qualitative: 'Do you understand and believe in the business? Your call.' },
+    { key: 'meaning',    label: 'Meaning',    hint: 'Predictable: steady growth and profits' },
     { key: 'moat',       label: 'Moat',       hint: 'Big 5 numbers vs the 10% target' },
-    { key: 'management', label: 'Management', qualitative: 'Is management honest and owner-oriented? Your call.' },
+    { key: 'management', label: 'Management', hint: 'Returns, debt, dilution, insiders, governance' },
     { key: 'financial',  label: 'Financial Health', hint: 'Returns, debt, liquidity, margins' },
   ];
+  const details = scores.details || {};
+  const mark = { 2: ['✓', '#10b981'], 1: ['≈', '#f59e0b'], 0: ['✗', '#ef4444'] };
   const grid = $('scoresGrid');
   const r = 30, circ = 2 * Math.PI * r;
-  grid.innerHTML = items.map(({ key, label, qualitative, hint }) => {
+  grid.innerHTML = items.map(({ key, label, hint }) => {
     const val = scores[key];
     const has = val != null;
     const color = !has ? '#6b7280' : val >= 7 ? '#10b981' : val >= 5 ? '#f59e0b' : '#ef4444';
     const pct   = has ? val / 10 : 0;
-    const sub   = qualitative ? `Not scored — qualitative. ${qualitative}`
-                : has ? hint : 'Not enough data to score';
+    const sub   = has ? hint : 'Not enough data to score';
+    const checks = (details[key] || []).map(c => {
+      const [ic, col] = mark[c.points] || ['–', '#6b7280'];
+      return `<li><span style="color:${col}">${ic}</span> ${esc(c.label)}
+        <span class="score-check-val">${esc(c.value)}</span></li>`;
+    }).join('');
     return `
       <div class="card score-card">
         <div class="score-ring">
@@ -1559,6 +1632,7 @@ function renderScores(scores) {
         </div>
         <div class="score-name">${label}</div>
         <div class="score-hint">${esc(sub)}</div>
+        ${checks ? `<ul class="score-checks">${checks}</ul>` : ''}
       </div>`;
   }).join('');
 }
