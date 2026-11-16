@@ -43,7 +43,8 @@ def price_history(start=130.0, end=300.0, tz="America/New_York"):
 
 
 class FakeTicker:
-    def __init__(self, info=None, inc=None, bal=None, cf=None, hist=None, growth=None):
+    def __init__(self, info=None, inc=None, bal=None, cf=None, hist=None, growth=None, fast=None):
+        self._fast = fast
         self.info = info or {}
         self.income_stmt = inc if inc is not None else pd.DataFrame()
         self.balance_sheet = bal if bal is not None else pd.DataFrame()
@@ -51,6 +52,11 @@ class FakeTicker:
         self._hist = hist if hist is not None else pd.DataFrame()
         self.growth_estimates = growth if growth is not None else pd.DataFrame()
         self.history_calls = []
+
+    def __getattr__(self, name):
+        if name == "fast_info" and self._fast is not None:
+            return self._fast
+        raise AttributeError(name)
 
     def history(self, **kw):
         self.history_calls.append(kw)
@@ -387,6 +393,35 @@ class TestAnalysis(AnalysisCase):
         self.assertEqual(d["verdict"]["verdict"], "INSUFFICIENT DATA")
         self.assertIsNone(d["scores"]["moat"])
         self.assertIsNone(d["scores"]["financial"])
+
+
+class TestThrottledQuote(AnalysisCase):
+    """Yahoo throttling makes yfinance return an empty quote without raising."""
+    FAST = {"lastPrice": 300.0, "previousClose": 298.5, "marketCap": 300.0 * 14.7 * B,
+            "shares": 14.7 * B, "currency": "USD", "quoteType": "EQUITY"}
+
+    def throttled(self):
+        return base_ticker(info={}, fast=dict(self.FAST), growth=pd.DataFrame())
+
+    def test_empty_quote_is_a_retryable_error(self):
+        with self.assertRaises(r1.IncompleteData) as cm:
+            self.run_analysis(ticker=self.throttled())
+        self.assertTrue(r1._is_rate_limit(cm.exception))
+
+    def test_partial_result_is_labelled_and_not_cached(self):
+        old_yf, old_sleep = r1.yf, r1.time.sleep
+        r1.yf = FakeYF({"SLOW": self.throttled()})
+        r1.time.sleep = lambda *_: None
+        r1._CACHE.clear()
+        try:
+            d = r1.analyze_cached("SLOW")
+            self.assertTrue(d["partial"])
+            self.assertEqual(d["info"]["price"], 300.0)
+            self.assertTrue(any("rate-limiting" in n for n in d["notes"]))
+            self.assertEqual(d["valuation"]["eps_source"], "FY2025")   # no TTM EPS → latest fiscal year
+            self.assertNotIn("SLOW", r1._CACHE)
+        finally:
+            r1.yf, r1.time.sleep = old_yf, old_sleep
 
 
 class TestServer(unittest.TestCase):

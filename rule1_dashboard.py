@@ -69,6 +69,9 @@ class AnalysisError(Exception):
         super().__init__(msg)
         self.status = status
 
+class IncompleteData(Exception):
+    """Yahoo answered, but without the quote data (usually rate limiting)."""
+
 def to_f(val, default=None):
     try:
         f = float(val)
@@ -296,15 +299,57 @@ def to_score(parts):
 #  CORE ANALYSIS
 # ─────────────────────────────────────────────────────────────────
 
-def analyze(sym):
+def fast_quote(tk):
+    """Price basics from Yahoo's chart endpoint, which keeps working when the
+    richer quote endpoint is being throttled."""
+    out = {}
+    try:
+        fi = tk.fast_info
+        for src, dst in (("lastPrice", "currentPrice"), ("previousClose", "previousClose"),
+                         ("marketCap", "marketCap"), ("shares", "sharesOutstanding"),
+                         ("yearHigh", "fiftyTwoWeekHigh"), ("yearLow", "fiftyTwoWeekLow")):
+            try:
+                v = to_f(fi[src])
+            except Exception:
+                v = None
+            if v is not None:
+                out[dst] = v
+        for src, dst in (("currency", "currency"), ("quoteType", "quoteType")):
+            try:
+                v = fi[src]
+            except Exception:
+                v = None
+            if isinstance(v, str) and v:
+                out[dst] = v
+    except Exception as e:
+        if _is_rate_limit(e):
+            raise
+    return out
+
+def analyze(sym, allow_partial=False):
     tk = yf.Ticker(sym)
     try:
-        info = tk.info or {}
+        info = dict(tk.info or {})
     except Exception as e:
         if _is_rate_limit(e):
             raise
         info = {}
     notes = []
+
+    # When Yahoo throttles the quote endpoint, yfinance returns an empty quote
+    # instead of raising. Never present that as a real analysis: confirm the
+    # ticker exists, then ask the caller to retry (or accept a partial result).
+    partial = False
+    if to_f(info.get("currentPrice")) is None and to_f(info.get("regularMarketPrice")) is None:
+        basics = fast_quote(tk)
+        if basics.get("currentPrice") is not None:
+            if not allow_partial:
+                raise IncompleteData("Yahoo Finance returned an incomplete quote (rate limit).")
+            partial = True
+            info = {**basics, **{k: v for k, v in info.items() if v is not None}}
+            notes.append("Yahoo Finance returned only part of the quote data (it is probably "
+                         "rate-limiting requests). Analyst estimates, trailing EPS, dividend and "
+                         "company details may be missing — try again in a minute for the full analysis.")
 
     # ── Basic info ──────────────────────────────────────────────
     quote_type = str(info.get("quoteType") or "").upper()
@@ -822,7 +867,7 @@ def analyze(sym):
             "management": None, "financial": fin_sc, "overall": overall,
         },
         "verdict": {"verdict": verdict, "confidence": confidence, "reasons": reasons},
-        "notes": notes,
+        "notes": notes, "partial": partial,
     }
 
 # ─────────────────────────────────────────────────────────────────
@@ -1677,7 +1722,7 @@ _SYMBOL_LOCKS = {}
 _TICKER_RE = re.compile(r"^[A-Z0-9][A-Z0-9.\-^=]{0,14}$")
 
 def _is_rate_limit(err):
-    if type(err).__name__ == "YFRateLimitError":
+    if type(err).__name__ in ("YFRateLimitError", "IncompleteData"):
         return True
     m = str(err).lower()
     return "too many" in m or "rate limit" in m or "rate-limit" in m or "429" in m
@@ -1697,13 +1742,17 @@ def analyze_cached(sym):
         try:
             for attempt in range(3):
                 try:
-                    result = analyze(sym)
+                    # Last attempt: settle for a clearly-labelled partial result
+                    # rather than nothing if Yahoo still withholds the quote.
+                    result = analyze(sym, allow_partial=(attempt == 2))
                     break
                 except Exception as e:
                     if _is_rate_limit(e) and attempt < 2:
                         time.sleep(1.5 * (attempt + 1))  # back off, then retry
                         continue
                     raise
+            if result.get("partial"):
+                return result               # don't cache a degraded answer
             with _CACHE_LOCK:
                 if len(_CACHE) >= _CACHE_MAX:
                     for old in sorted(_CACHE, key=lambda k: _CACHE[k][0])[:_CACHE_MAX // 4]:
