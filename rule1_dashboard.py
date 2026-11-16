@@ -248,9 +248,12 @@ def fx_rate(src, dst):
     return None
 
 def analyst_growth(tk):
-    """Analysts' forward EPS growth estimate as ``(rate, label)``.
+    """Analysts' forward EPS growth estimate as ``(annual rate, label)``.
 
-    Prefers the long-term (≈5-year) estimate; falls back to next fiscal year.
+    Prefers the long-term (≈5-year) estimate. Yahoo frequently leaves that
+    blank, in which case the current- and next-fiscal-year estimates are
+    combined into one annualised two-year rate — a single year's estimate is
+    too noisy to stand in for long-term growth on its own.
     """
     try:
         ge = tk.growth_estimates
@@ -263,12 +266,21 @@ def analyst_growth(tk):
     col = next((c for c in ("stockTrend", "stock") if c in ge.columns), None)
     if col is None:
         return None, None
-    for period, label in (("LTG", "long-term"), ("+5y", "next 5 years"),
-                          ("+1y", "next fiscal year")):
-        if period in ge.index:
-            g = to_f(ge.loc[period, col])
-            if g is not None:
-                return g, label
+
+    def pick(period):
+        return to_f(ge.loc[period, col]) if period in ge.index else None
+
+    for period, label in (("LTG", "long-term"), ("+5y", "next 5 years")):
+        g = pick(period)
+        if g is not None:
+            return g, label
+    g0, g1 = pick("0y"), pick("+1y")
+    if g0 is not None and g1 is not None and g0 > -1 and g1 > -1:
+        return math.sqrt((1 + g0) * (1 + g1)) - 1, "next 2 fiscal years"
+    if g1 is not None:
+        return g1, "next fiscal year"
+    if g0 is not None:
+        return g0, "current fiscal year"
     return None, None
 
 def tier(val, good, warn):
@@ -364,7 +376,7 @@ def analyze(sym, allow_partial=False):
 
     if quote_type and quote_type != "EQUITY":
         raise AnalysisError(
-            f"{sym} is a {quote_type.lower().replace('_', ' ')}, not a company stock. "
+            f"{sym} is not a company stock (Yahoo lists it as: {quote_type.replace('_', ' ')}). "
             "Rule #1 analysis needs a business with financial statements.", 422)
 
     price_chg     = (price - prev_cls) if (price is not None and prev_cls) else None
@@ -457,10 +469,11 @@ def analyze(sym, allow_partial=False):
     ocf        = money(crow("Operating Cash Flow", "Total Cash From Operating Activities"))
     capex_raw  = money(crow("Capital Expenditure", "Capital Expenditures"))
     fcf_rep    = money(crow("Free Cash Flow"))
-    dna        = money(crow("Depreciation And Amortization", "Depreciation Amortization Depletion",
-                            "Depreciation"))
-    if not any(v is not None for v in dna):
-        dna    = money(irow("Reconciled Depreciation"))
+    # Yahoo fills a different depreciation line for different companies (and
+    # sometimes for different years), so take the first one reported per year.
+    dna_lines  = [crow("Depreciation And Amortization"), crow("Depreciation Amortization Depletion"),
+                  crow("Depreciation"), irow("Reconciled Depreciation")]
+    dna        = money([next((ln[i] for ln in dna_lines if ln[i] is not None), None) for i in range(n)])
     chg_ar     = money(crow("Changes In Account Receivables", "Change In Receivables"))
     chg_ap     = money(crow("Change In Account Payable", "Change In Payable",
                             "Change In Payables And Accrued Expense"))
@@ -643,9 +656,18 @@ def analyze(sym, allow_partial=False):
 
     # 2) Sticker Price
     curr_eps, eps_source = to_f(info.get("trailingEps")), "TTM"
+    info_pe = to_f(info.get("trailingPE"))
+    if curr_eps is not None and unit != 1.0:
+        # Pence-quoted stocks: Yahoo gives EPS in pounds while the price is in
+        # pence. Confirm with price ÷ P/E when possible, then restate in pence.
+        in_major = True
+        if info_pe and price and curr_eps > 0:
+            in_major = (price / info_pe) / curr_eps > unit / 3
+        if in_major:
+            curr_eps *= unit
     if curr_eps is None and comparable and last(eps_vals) is not None:
         curr_eps, eps_source = last(eps_vals), f"FY{fiscal_year}"
-    pe = to_f(info.get("trailingPE"))
+    pe = info_pe
     if pe is None and price and curr_eps and curr_eps > 0:
         pe = price / curr_eps
 
@@ -660,8 +682,11 @@ def analyze(sym, allow_partial=False):
         hist_growth, hist_growth_src = gr["bvps"], ("Book value / share" if gr["bvps"] is not None else None)
     an_growth, an_growth_src = analyst_growth(tk)
 
-    candidates  = [g for g in (hist_growth, an_growth) if g is not None and g > 0]
-    growth_used = min(min(candidates), MAX_GROWTH) if candidates else None
+    # Strictly the lower of the two: if either one says "not growing", there
+    # is no growth rate — never a default and never the more flattering figure.
+    candidates  = [g for g in (hist_growth, an_growth) if g is not None]
+    lowest      = min(candidates) if candidates else None
+    growth_used = min(lowest, MAX_GROWTH) if (lowest is not None and lowest > 0) else None
 
     # Historical P/E: price at each fiscal year-end ÷ that year's EPS.
     hist_pes = []
@@ -681,7 +706,7 @@ def analyze(sym, allow_partial=False):
     elif curr_eps <= 0:
         sticker_issue = "negative_eps"
     elif growth_used is None:
-        sticker_issue = "no_growth" if (hist_growth is not None or an_growth is not None) else "no_growth_data"
+        sticker_issue = "no_growth" if candidates else "no_growth_data"
     else:
         default_pe    = 2 * growth_used * 100
         future_pe     = min(default_pe, hist_pe) if hist_pe else default_pe
@@ -707,6 +732,11 @@ def analyze(sym, allow_partial=False):
                 payback_yrs = yr_n
         payback_over  = bool(mktcap) and payback_yrs is None
         payback_price = (eight_yr * ps_unit / shares) if shares else None
+
+    if "financial" in str(sector).lower() or str(industry).lower().startswith(("banks", "insurance")):
+        notes.append("Banks, insurers and other financial companies don't fit this framework well: "
+                     "their operating cash flow, capex, debt and current ratio mean something different, "
+                     "so treat the Ten Cap, Payback Time, ROIC and debt figures with caution.")
 
     # ── Scores ──────────────────────────────────────────────────
     # Moat = the Big 5: ROIC plus sales, EPS, equity and cash growth, each
@@ -748,8 +778,13 @@ def analyze(sym, allow_partial=False):
                        "predictable, profitable business.")
     elif sticker_issue == "no_growth":
         verdict, confidence = "AVOID / WAIT", "Medium"
-        reasons.append("Neither the company's history nor analyst estimates show positive growth, "
-                       "so there is no Sticker Price.")
+        why = []
+        if hist_growth is not None and hist_growth <= 0:
+            why.append(f"{hist_growth_src.lower()} has not grown over the available history")
+        if an_growth is not None and an_growth <= 0:
+            why.append(f"analysts expect earnings to shrink over the {an_growth_src}")
+        reasons.append("There is no Sticker Price because " + " and ".join(why) +
+                       " — Rule #1 values a business on the lower of its historical and expected growth.")
     else:
         q_text = ("The business scores 7+ on both moat and financial health."
                   if (is_strong_fin and is_good_moat)
@@ -793,10 +828,11 @@ def analyze(sym, allow_partial=False):
     # ── Dividend yield ──────────────────────────────────────────
     # Yahoo's `dividendYield` field is already in percent (0.41 = 0.41%), so
     # work the yield out from the dividend itself and keep it as a fraction.
+    # (The dividend is quoted in the major currency, hence `unit` for pence-quoted stocks.)
     div_rate  = to_f(info.get("dividendRate"))
-    div_yield = (div_rate / price) if (div_rate is not None and price) else None
-    if div_yield is None:
-        div_yield = to_f(info.get("trailingAnnualDividendYield"))
+    div_yield = (div_rate * unit / price) if (div_rate is not None and price) else None
+    if div_yield is None and to_f(info.get("trailingAnnualDividendYield")) is not None:
+        div_yield = to_f(info.get("trailingAnnualDividendYield")) * unit
     if div_yield is None and to_f(info.get("dividendYield")) is not None:
         div_yield = to_f(info.get("dividendYield")) / 100.0
 

@@ -334,6 +334,42 @@ class TestAnalysis(AnalysisCase):
         self.assertEqual(d["valuation"]["sticker_issue"], "no_growth")
         self.assertIsNone(d["valuation"]["sticker_price"])
 
+    def test_short_term_analyst_estimates_are_annualised_over_two_years(self):
+        v = self.run_analysis(growth=growth_frame(LTG=NAN, p1y=0.02, **{"0y": 0.10}))["valuation"]
+        self.assertAlmostEqual(v["analyst_growth"], math.sqrt(1.10 * 1.02) - 1, places=6)
+        self.assertEqual(v["analyst_growth_source"], "next 2 fiscal years")
+        self.assertAlmostEqual(v["growth_rate_used"], v["analyst_growth"], places=6)
+
+    def test_growth_is_strictly_the_lower_of_history_and_analysts(self):
+        # History is strong, but analysts expect earnings to fall: no flattering fallback.
+        d = self.run_analysis(growth=growth_frame(LTG=-0.05))
+        self.assertIsNone(d["valuation"]["growth_rate_used"])
+        self.assertEqual(d["valuation"]["sticker_issue"], "no_growth")
+        self.assertIn("analysts expect earnings to shrink", " ".join(d["verdict"]["reasons"]))
+
+    def test_depreciation_line_is_picked_per_year(self):
+        cf = base_cf(**{"Depreciation And Amortization": [11.1 * B, 11.5 * B, NAN, NAN],
+                        "Depreciation": [NAN, NAN, 11.4 * B, 11.7 * B]})
+        v = self.run_analysis(cf=cf)["valuation"]
+        self.assertEqual(v["owner_earnings_method"], "town")
+        self.assertAlmostEqual(v["owner_earnings_parts"]["depreciation"], 11.7 * B)
+
+    def test_pence_quoted_stock(self):
+        # Price in pence; market cap, EPS and dividend reported in pounds.
+        info = base_info(currency="GBp", financialCurrency="GBP", currentPrice=30000.0,
+                         previousClose=29850.0, trailingEps=8.0, trailingPE=37.5,
+                         dividendRate=1.04, marketCap=300.0 * 14.7 * B)
+        d = self.run_analysis(info=info, hist=price_history(13000.0, 30000.0))
+        self.assertAlmostEqual(d["info"]["shares"], 14.7 * B, delta=1e3)
+        self.assertAlmostEqual(d["info"]["dividend_yield"], 1.04 / 300.0, places=6)
+        self.assertAlmostEqual(d["valuation"]["current_eps"], 800.0)
+        self.assertAlmostEqual(d["big5"]["eps_values"][-1], 746.0)
+        self.assertAlmostEqual(d["big5"]["revenues"][-1], 416.2 * B)        # totals stay in pounds
+        self.assertAlmostEqual(d["valuation"]["ten_cap_per_share"],
+                               128.0 * B * 10 * 100 / (14.7 * B), places=2)
+        self.assertEqual(d["currency"]["per_share"], "GBp")
+        self.assertEqual(d["currency"]["statements"], "GBP")
+
     def test_multi_class_shares_use_market_cap_over_price(self):
         # Yahoo reports only one share class in sharesOutstanding (as for GOOGL).
         d = self.run_analysis(info=base_info(sharesOutstanding=7.0 * B))
