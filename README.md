@@ -8,14 +8,16 @@ A single-file Python web app that runs a full **Phil Town "Rule #1"** stock anal
 
 ## What it shows
 
-- **The Big 5 growth rates** — Revenue, EPS, Book Value (Equity), Operating Cash Flow, and Free Cash Flow over the available history.
-- **Moat & financial health scores** — ROIC, ROE, debt-to-equity, current ratio, profit/operating margins, and interest coverage, distilled into 1–10 scores.
+- **The Big 5 numbers** — ROIC plus the growth rates of Revenue, EPS, Book Value per share (Equity), and Free Cash Flow over the available history. Rule #1 wants each at 10%+ a year.
+- **Moat & financial health scores** — the Big 5 against the 10% target (moat), and ROIC, debt-to-equity, current ratio, profit margin, and interest coverage (financial health), each distilled into a 1–10 score. Metrics Yahoo doesn't report are left out of the score rather than counted as failures. *Meaning* and *Management* are qualitative and are deliberately left for you to judge.
 - **Three valuation models:**
-  - **10-Cap** — owner-earnings yield (intrinsic value = owner earnings × 10).
-  - **Sticker Price** — a 10-year DCF with a 50% Margin of Safety price.
-  - **Payback Time** — how many years of free cash flow it takes to recoup the market cap.
-- **Technical timing** — 50/200-day moving averages, golden/death cross, 52-week range, and volume trend.
-- **A final verdict** — Strong Buy / Buy / Watchlist / Avoid, with a confidence level.
+  - **Ten Cap** — owner earnings × 10, where owner earnings = net income + depreciation & amortization + change in receivables + change in payables + income tax − capex (all capex is treated as maintenance capex, the conservative choice).
+  - **Sticker Price** — EPS grown for 10 years, multiplied by a future P/E, discounted back at 15% a year, with a 50% Margin of Safety price. The growth rate is the lower of the company's historical growth (book value per share, or EPS if equity isn't growing) and analysts' long-term estimate, capped at 15%. The future P/E is the lower of 2 × growth and the stock's own historical P/E.
+  - **Payback Time** — how many years of free cash flow, growing at that same rate, it takes to add up to the market cap (target: 8 years or less).
+- **Technical timing** — 50/200-day moving averages plotted on a 1-year price chart, golden/death cross, 52-week range, and volume trend.
+- **A final verdict** — Strong Buy / Buy / Watchlist / Avoid, with the reasons behind it. If earnings are negative or nothing shows positive growth, there is no Sticker Price and the dashboard says so instead of assuming a growth rate.
+
+Foreign companies and ADRs are handled: statements reported in another currency are converted to the currency the stock trades in, and per-share figures are restated per quoted share.
 
 ## Run it locally
 
@@ -28,9 +30,19 @@ pip install -r requirements.txt
 python rule1_dashboard.py
 ```
 
-The server starts on **http://localhost:8080** and opens your browser automatically. Enter any ticker (e.g. `AAPL`, `GOOGL`, `AMZN`) in the search bar.
+The server starts on **http://localhost:8080** and opens your browser automatically. Enter any ticker (e.g. `AAPL`, `GOOGL`, `AMZN`) in the search bar. Use Yahoo Finance symbols for other markets and share classes (`BRK-B`, `SHOP.TO`, `VOD.L`).
+
+Locally the server only listens on your own machine (`127.0.0.1`). Set `HOST=0.0.0.0` if you want other devices on your network to reach it, and `PORT` to change the port.
 
 Press `Ctrl+C` to stop.
+
+### Tests
+
+The analysis engine has an offline test suite that replaces Yahoo Finance with fixtures:
+
+```bash
+python -m unittest discover -s tests -v
+```
 
 ## How it works
 
