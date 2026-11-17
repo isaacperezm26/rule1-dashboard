@@ -1,0 +1,18 @@
+{
+  "updated": "2026-11-17",
+  "flags": {
+    "NVDA": {
+      "company": "NVIDIA",
+      "severity": "critical",
+      "headline": "CEO Jensen Huang resigned after disclosing a relationship with an alleged Chinese spy",
+      "summary": "Nvidia opened an investigation on Nov 8 after Huang disclosed an intimate relationship with an executive accused of spying for China; reports of further affairs followed. The board pushed him out and CFO Colette Kress became interim CEO on Nov 12. The Justice Department is reportedly examining possible export-control evasion, and Huang has been summoned to testify before Congress.",
+      "first_seen": "2026-11-08",
+      "last_confirmed": "2026-11-17",
+      "sources": [
+        {"title": "TechCrunch: The unfolding Jensen Huang scandal, a timeline", "url": "https://techcrunch.com/2026/11/13/nvidia-ceo-jensen-huangs-affair-with-alleged-chinese-spy-a-timeline/"},
+        {"title": "Washington Post: What to know about the Nvidia scandal", "url": "https://www.washingtonpost.com/technology/2026/11/09/what-know-about-nvidia-scandal-ceo-jensen-huang/"},
+        {"title": "CNN: Huang summoned to testify after resigning as CEO", "url": "https://www.cnn.com/2026/11/11/business/live-news/nvidia-jensen-huang-investigation-fallout"}
+      ]
+    }
+  }
+}
