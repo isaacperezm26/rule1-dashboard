@@ -19,6 +19,7 @@ import pandas as pd
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import rule1_dashboard as r1  # noqa: E402
+r1._NEWS.update(at=float("inf"), flags={})  # tests never fetch real news flags
 
 B = 1e9
 YEARS = [pd.Timestamp(f"{y}-09-30") for y in (2022, 2023, 2024, 2025)]
@@ -144,6 +145,12 @@ def base_ticker(**kw):
 
 
 class AnalysisCase(unittest.TestCase):
+    flags = {}
+
+    def setUp(self):
+        # Never fetch real news flags in tests.
+        r1._NEWS.update(at=float("inf"), flags=dict(self.flags))
+
     def run_analysis(self, sym="TEST", extra=None, **kw):
         tk = kw.pop("ticker", None) or base_ticker(**kw)
         tickers = {sym: tk}
@@ -374,7 +381,7 @@ class TestAnalysis(AnalysisCase):
         self.assertTrue(1 <= s["management"] <= 10)
         self.assertNotEqual((s["meaning"], s["management"]), (7, 7))
         self.assertEqual(len(s["details"]["meaning"]), 4)
-        self.assertEqual(len(s["details"]["management"]), 5)
+        self.assertEqual(len(s["details"]["management"]), 6)
         for c in s["details"]["meaning"] + s["details"]["management"]:
             self.assertIn(c["points"], (0, 1, 2, None))
         self.assertTrue(1 <= s["moat"] <= 10)
@@ -606,3 +613,39 @@ class TestServer(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestNewsFlags(AnalysisCase):
+    def flag(self, severity, days_old=0):
+        day = (pd.Timestamp.now() - pd.Timedelta(days=days_old)).strftime("%Y-%m-%d")
+        r1._NEWS["flags"] = {"TEST": {"severity": severity, "headline": "CEO resigns amid probe",
+                                      "first_seen": day, "last_confirmed": day,
+                                      "sources": [{"title": "x", "url": "https://example.com"}]}}
+
+    def test_no_flag_leaves_score_alone(self):
+        d = self.run_analysis()
+        self.assertIsNone(d["news"])
+        self.assertIsNone(d["scores"]["details"]["management"][-1]["points"])
+
+    def test_critical_flag_caps_management_and_blocks_buy(self):
+        base = self.run_analysis()["scores"]["management"]
+        self.flag("critical")
+        d = self.run_analysis()
+        self.assertEqual(d["news"]["severity"], "critical")
+        self.assertLessEqual(d["scores"]["management"], 3)
+        self.assertLess(d["scores"]["management"], base)
+        self.assertNotIn(d["verdict"]["verdict"], ("BUY", "STRONG BUY"))
+        self.assertTrue(any("Management news" in r for r in d["verdict"]["reasons"]))
+
+    def test_major_flag_caps_at_six(self):
+        self.flag("major")
+        self.assertLessEqual(self.run_analysis()["scores"]["management"], 6)
+
+    def test_stale_flag_is_ignored(self):
+        self.flag("critical", days_old=r1.NEWS_FLAG_MAX_AGE_DAYS + 5)
+        self.assertIsNone(self.run_analysis()["news"])
+
+    def test_parse_drops_bad_entries(self):
+        got = r1._parse_flags({"flags": {"aapl": {"severity": "critical"},
+                                         "X": {"severity": "huge"}, "Y": "nope"}})
+        self.assertEqual(list(got), ["AAPL"])

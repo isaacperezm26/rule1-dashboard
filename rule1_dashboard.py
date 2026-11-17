@@ -406,6 +406,65 @@ def decide_verdict(price, sticker_price, mos_price, ten_cap_ok, payback_ok,
     return verdict, confidence, reasons
 
 # ─────────────────────────────────────────────────────────────────
+#  NEWS FLAGS (written daily by the news agent)
+# ─────────────────────────────────────────────────────────────────
+# A scheduled agent scans the news every day and records serious management
+# news (CEO exits, fraud, investigations, misconduct…) in news_flags.json on
+# the repo's `news-flags` branch. A local news_flags.json, if present, wins.
+
+NEWS_FLAGS_URL = os.environ.get(
+    "NEWS_FLAGS_URL",
+    "https://raw.githubusercontent.com/isaacperezm26/rule1-dashboard/news-flags/news_flags.json")
+NEWS_FLAGS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "news_flags.json")
+NEWS_FLAGS_TTL  = 3600          # re-read at most once an hour
+NEWS_FLAG_MAX_AGE_DAYS = 90     # ignore a flag the agent hasn't re-confirmed for this long
+NEWS_SEVERITIES = ("minor", "major", "critical")
+_NEWS = {"at": 0.0, "flags": {}}
+_NEWS_LOCK = threading.Lock()
+
+def _parse_flags(doc):
+    flags = {}
+    for sym, f in ((doc or {}).get("flags") or {}).items():
+        if isinstance(f, dict) and f.get("severity") in NEWS_SEVERITIES:
+            flags[str(sym).upper()] = f
+    return flags
+
+def load_news_flags():
+    """{TICKER: flag}; empty when nothing can be read (never raises)."""
+    with _NEWS_LOCK:
+        if time.time() - _NEWS["at"] < NEWS_FLAGS_TTL:
+            return _NEWS["flags"]
+        flags = None
+        try:
+            if os.path.exists(NEWS_FLAGS_FILE):
+                with open(NEWS_FLAGS_FILE, encoding="utf-8") as fh:
+                    flags = _parse_flags(json.load(fh))
+            elif NEWS_FLAGS_URL:
+                from urllib.request import urlopen
+                with urlopen(NEWS_FLAGS_URL, timeout=5) as resp:
+                    flags = _parse_flags(json.loads(resp.read().decode("utf-8")))
+        except Exception as e:
+            print(f"  (news flags unavailable: {e})", flush=True)
+        if flags is not None:
+            _NEWS["flags"] = flags
+        _NEWS["at"] = time.time()
+        return _NEWS["flags"]
+
+def news_flag_for(sym, today=None):
+    """The active flag for a ticker, or None (stale flags are ignored)."""
+    f = load_news_flags().get(sym.upper())
+    if not f:
+        return None
+    try:
+        seen = pd.Timestamp(f.get("last_confirmed") or f.get("first_seen"))
+        now  = pd.Timestamp(today) if today else pd.Timestamp.now()
+        if (now - seen).days > NEWS_FLAG_MAX_AGE_DAYS:
+            return None
+    except Exception:
+        pass
+    return f
+
+# ─────────────────────────────────────────────────────────────────
 #  CORE ANALYSIS
 # ─────────────────────────────────────────────────────────────────
 
@@ -906,7 +965,20 @@ def analyze(sym, allow_partial=False):
         check("Low governance risk (1 = best, 10 = worst)", tier_inv(gov_risk, 3, 6),
               f"{gov_risk:.0f} / 10" if gov_risk is not None else None),
     ]
+    news = news_flag_for(sym)
+    if news:
+        sev = news["severity"]
+        mgmt_checks.append({"label": "No serious management news",
+                            "points": 1 if sev == "minor" else 0,
+                            "value": f"{sev}: {news.get('headline') or 'see news'}"})
+    else:
+        mgmt_checks.append({"label": "No serious management news", "points": None,
+                            "value": "nothing flagged by the daily news scan"})
     mgmt_sc = to_score([c["points"] for c in mgmt_checks])
+    if news and news["severity"] == "critical" and mgmt_sc is not None:
+        mgmt_sc = min(mgmt_sc, 3)     # integrity problems outweigh good numbers
+    elif news and news["severity"] == "major" and mgmt_sc is not None:
+        mgmt_sc = min(mgmt_sc, 6)
 
     quant = [s for s in (meaning_sc, moat_sc, mgmt_sc, fin_sc) if s is not None]
     overall = round(sum(quant) / len(quant)) if quant else None
@@ -966,6 +1038,13 @@ def analyze(sym, allow_partial=False):
     else:
         verdict, confidence, reasons = decide_verdict(
             price, sticker_price, mos_price, ten_cap_ok, payback_ok, is_strong_fin, is_good_moat)
+
+    if news and news["severity"] in ("major", "critical"):
+        if news["severity"] == "critical" and verdict in ("STRONG BUY", "BUY"):
+            verdict, confidence = "WATCHLIST", "Low"
+            reasons.append("Held at Watchlist: Rule #1 doesn't buy while management's "
+                           "integrity is in question.")
+        reasons.append(f"Management news ({news['severity']}): {news.get('headline') or 'see the Management card'}.")
 
     if sticker_issue in ("negative_eps", "no_growth") and price is not None:
         # No Sticker Price means no buy, whatever the other two methods say.
@@ -1052,6 +1131,7 @@ def analyze(sym, allow_partial=False):
             "management": mgmt_sc, "financial": fin_sc, "overall": overall,
             "details": {"meaning": meaning_checks, "management": mgmt_checks},
         },
+        "news": news,
         "verdict": {"verdict": verdict, "confidence": confidence, "reasons": reasons,
                     "methods": methods},
         "notes": notes, "partial": partial,
@@ -1209,6 +1289,11 @@ HTML = r"""<!DOCTYPE html>
   .score-checks { list-style: none; margin: 10px 0 0; padding: 0; text-align: left; font-size: 11px; line-height: 1.5; color: var(--muted); }
   .score-checks li { margin-top: 3px; }
   .score-check-val { display: block; padding-left: 14px; opacity: 0.75; }
+  .news-flag { margin-top: 12px; padding: 10px; border: 1px solid; border-radius: 8px; text-align: left; font-size: 11px; line-height: 1.5; color: var(--muted); }
+  .news-flag-head { font-weight: 700; letter-spacing: .03em; }
+  .news-flag-title { color: var(--text); font-weight: 600; margin: 2px 0 4px; }
+  .news-flag-src { margin-top: 6px; }
+  .news-flag-src a { color: #60a5fa; }
 
   /* ── Big 5 table ── */
   .big5-table { width: 100%; border-collapse: collapse; font-size: 12px; }
@@ -1500,7 +1585,7 @@ function renderAll(d) {
   renderHero(d.info, d.currency);
   renderVerdict(d.verdict, d.info, d.valuation);
   renderNotes(d.notes);
-  renderScores(d.scores);
+  renderScores(d.scores, d.news);
   renderChart(d.technical);
   renderBig5(d.big5);
   renderFinancials(d.financials);
@@ -1597,7 +1682,7 @@ function renderNotes(notes) {
   box.style.display = (notes && notes.length) ? 'block' : 'none';
 }
 
-function renderScores(scores) {
+function renderScores(scores, news) {
   const items = [
     { key: 'meaning',    label: 'Meaning',    hint: 'Predictable: steady growth and profits' },
     { key: 'moat',       label: 'Moat',       hint: 'Big 5 numbers vs the 10% target' },
@@ -1633,8 +1718,22 @@ function renderScores(scores) {
         <div class="score-name">${label}</div>
         <div class="score-hint">${esc(sub)}</div>
         ${checks ? `<ul class="score-checks">${checks}</ul>` : ''}
+        ${key === 'management' ? newsBox(news) : ''}
       </div>`;
   }).join('');
+}
+
+function newsBox(news) {
+  if (!news) return '';
+  const col = { critical: '#ef4444', major: '#f59e0b', minor: '#9ca3af' }[news.severity] || '#9ca3af';
+  const links = (news.sources || []).filter(x => /^https?:\/\//.test(x.url || '')).slice(0, 4)
+    .map(x => `<a href="${esc(x.url)}" target="_blank" rel="noopener noreferrer">${esc(x.title || x.url)}</a>`).join('<br>');
+  return `<div class="news-flag" style="border-color:${col}">
+      <div class="news-flag-head" style="color:${col}">⚠ ${esc(news.severity.toUpperCase())} NEWS · ${esc(news.last_confirmed || news.first_seen || '')}</div>
+      <div class="news-flag-title">${esc(news.headline || '')}</div>
+      ${news.summary ? `<div>${esc(news.summary)}</div>` : ''}
+      ${links ? `<div class="news-flag-src">${links}</div>` : ''}
+    </div>`;
 }
 
 function renderChart(tech) {
