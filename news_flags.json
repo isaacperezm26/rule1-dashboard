@@ -9,9 +9,22 @@
       "first_seen": "2026-11-08",
       "last_confirmed": "2026-11-17",
       "sources": [
-        {"title": "TechCrunch: The unfolding Jensen Huang scandal, a timeline", "url": "https://techcrunch.com/2026/11/13/nvidia-ceo-jensen-huangs-affair-with-alleged-chinese-spy-a-timeline/"},
-        {"title": "Washington Post: What to know about the Nvidia scandal", "url": "https://www.washingtonpost.com/technology/2026/11/09/what-know-about-nvidia-scandal-ceo-jensen-huang/"},
-        {"title": "CNN: Huang summoned to testify after resigning as CEO", "url": "https://www.cnn.com/2026/11/11/business/live-news/nvidia-jensen-huang-investigation-fallout"}
+        {
+          "title": "TechCrunch: The unfolding Jensen Huang scandal, a timeline",
+          "url": "https://techcrunch.com/2026/11/13/nvidia-ceo-jensen-huangs-affair-with-alleged-chinese-spy-a-timeline/"
+        },
+        {
+          "title": "CNN: CFO Colette Kress to serve as interim leader after Huang resignation",
+          "url": "https://www.cnn.com/2026/11/12/tech/jensen-huang-nvidia-resigns"
+        },
+        {
+          "title": "CNN: Huang summoned to testify after resigning as CEO",
+          "url": "https://www.cnn.com/2026/11/11/business/live-news/nvidia-jensen-huang-investigation-fallout"
+        },
+        {
+          "title": "Washington Post: What to know about the Nvidia scandal",
+          "url": "https://www.washingtonpost.com/technology/2026/11/09/what-know-about-nvidia-scandal-ceo-jensen-huang/"
+        }
       ]
     }
   }
