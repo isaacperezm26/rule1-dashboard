@@ -1,5 +1,5 @@
 {
-  "updated": "2026-11-18",
+  "updated": "2026-11-19",
   "flags": {
     "NVDA": {
       "company": "NVIDIA",
@@ -7,7 +7,7 @@
       "headline": "CEO Jensen Huang resigned over a relationship with an alleged Chinese spy; SEC now probing Nvidia's disclosures",
       "summary": "Huang resigned on Nov 12 after a board investigation into his relationship with an executive suspected of spying for China; CFO Colette Kress is interim CEO and the board has ruled out reinstating him despite his offer to return. The WSJ reported on Nov 17 that the SEC opened a civil probe into whether Nvidia's disclosures misled investors, adding to DOJ export-control scrutiny. Huang is due before three House committees on Dec 1.",
       "first_seen": "2026-11-08",
-      "last_confirmed": "2026-11-18",
+      "last_confirmed": "2026-11-19",
       "sources": [
         {
           "title": "CNN: Four takeaways from Nvidia's first earnings report after the Huang scandal",
