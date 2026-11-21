@@ -1,17 +1,21 @@
 {
-  "updated": "2026-11-20",
+  "updated": "2026-11-21",
   "flags": {
     "NVDA": {
       "company": "NVIDIA",
       "severity": "critical",
       "headline": "CEO Jensen Huang resigned over a relationship with an alleged Chinese spy; SEC now probing Nvidia's disclosures",
-      "summary": "Huang resigned on Nov 12 after a board investigation into his relationship with an executive suspected of spying for China; CFO Colette Kress is interim CEO and the board has ruled out reinstating him. The WSJ reported on Nov 17 that the SEC opened a civil probe into whether Nvidia's disclosures misled investors, and California's attorney general has subpoenaed the company over whether chips or confidential information reached China and whether investors were misled. The DOJ is also examining chip exports via Singapore, and Huang is due before three House committees on Dec 1.",
+      "summary": "Huang resigned on Nov 12 after a board investigation into his relationship with an executive suspected of spying for China; CFO Colette Kress is interim CEO and the board has ruled out reinstating him. The SEC has opened a civil probe into Nvidia's disclosures, and sources say its accounting practices are a focus; California's attorney general has also subpoenaed the company over possible chip diversion to China and misleading investors. The DOJ is examining chip exports via Singapore, a shareholder class action is pending, and Huang is due before three House committees on Dec 1.",
       "first_seen": "2026-11-08",
-      "last_confirmed": "2026-11-20",
+      "last_confirmed": "2026-11-21",
       "sources": [
         {
-          "title": "Newsweek: Nvidia subpoenaed in California over Jensen Huang China scandal",
-          "url": "https://www.newsweek.com/nvidia-california-subpoena-jensen-huang-china-scandal-12743893"
+          "title": "Reuters (via The Daily Star): Nvidia's accounting is a focus of US SEC investigation, sources say",
+          "url": "https://www.thedailystar.net/news/world/news/nvidias-accounting-focus-us-sec-investigation-sources-say-4329306"
+        },
+        {
+          "title": "CNBC: California attorney general issues Nvidia subpoena in probe of China chip diversion",
+          "url": "https://www.cnbc.com/2026/11/19/nvidia-california-bonta-subpoena-china-chips.html"
         },
         {
           "title": "CNN: Four takeaways from Nvidia's first earnings report after the Huang scandal",
@@ -20,10 +24,6 @@
         {
           "title": "Reuters (via Investing.com): Nvidia facing SEC probe after Huang's resignation, WSJ reports",
           "url": "https://investing.com/news/stock-market-news/nvidia-facing-sec-probe-after-huangs-resignation-wsj-reports-5034040"
-        },
-        {
-          "title": "CNBC: Huang says he's open to returning in first statement since resignation",
-          "url": "https://www.cnbc.com/2026/11/17/nvidia-jensen-huang-statement.html"
         }
       ]
     }
