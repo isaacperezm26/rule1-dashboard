@@ -1,5 +1,5 @@
 {
-  "updated": "2026-11-24",
+  "updated": "2026-11-25",
   "flags": {
     "NVDA": {
       "company": "NVIDIA",
@@ -7,7 +7,7 @@
       "headline": "Board reinstated Jensen Huang as CEO 11 days after his scandal-driven resignation, under White House pressure; SEC, DOJ and California probes continue",
       "summary": "Huang resigned on Nov 12 after a board investigation into his relationship with an executive suspected of spying for China, but the board reversed itself and reinstated him on Nov 22, citing 'input from senior levels of the United States government', five days after its chair had ruled out his return; Colette Kress remains CFO and a compliance chief reporting to a board committee is being added. The board's independent investigation continues, as do an SEC probe reportedly examining Nvidia's accounting and disclosures, a California attorney general subpoena, and DOJ scrutiny of chip exports via Singapore. Huang and the general counsel are due before House committees on Dec 1-2.",
       "first_seen": "2026-11-08",
-      "last_confirmed": "2026-11-24",
+      "last_confirmed": "2026-11-25",
       "sources": [
         {
           "title": "NVIDIA 8-K press release: Board reinstates Jen-Hsun Huang as CEO (Nov 23, 2026)",
