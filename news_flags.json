@@ -1,14 +1,18 @@
 {
-  "updated": "2026-11-27",
+  "updated": "2026-11-28",
   "flags": {
     "NVDA": {
       "company": "NVIDIA",
       "severity": "critical",
       "headline": "Board reinstated Jensen Huang as CEO 11 days after his scandal-driven resignation, under White House pressure; SEC, DOJ and California probes continue",
-      "summary": "Huang resigned on Nov 12 after a board investigation into his relationship with an executive suspected of spying for China, but the board reversed itself and reinstated him on Nov 22, citing 'input from senior levels of the United States government', five days after its chair had ruled out his return; Colette Kress remains CFO and a compliance chief reporting to a board committee is being added. The board's independent investigation continues, as do an SEC probe reportedly examining Nvidia's accounting and disclosures, a California attorney general subpoena, and DOJ scrutiny of chip exports via Singapore (Vice President Vance says he was assured Huang personally is not under DOJ investigation; FBI and DOJ leaders have declined to say). Huang and the general counsel are due before House committees on Dec 1-2.",
+      "summary": "Huang resigned on Nov 12 after a board investigation into his relationship with an executive suspected of spying for China, but the board reversed itself and reinstated him on Nov 22, citing 'input from senior levels of the United States government', five days after its chair had ruled out his return; Colette Kress remains CFO and a compliance chief reporting to a board committee is being added. The board's independent investigation continues, as do an SEC probe reportedly examining Nvidia's accounting and disclosures, a California attorney general subpoena, and DOJ scrutiny of chip exports via Singapore (Reuters reports the DOJ never opened a formal probe of Huang himself and the attorney general cleared him based on probes of Nvidia customers Super Micro and Megaspeed). Huang and the general counsel are due before House committees on Dec 1-2.",
       "first_seen": "2026-11-08",
-      "last_confirmed": "2026-11-27",
+      "last_confirmed": "2026-11-28",
       "sources": [
+        {
+          "title": "Reuters (via The Globe and Mail): U.S. Justice Department cleared Huang of national-security risk after probing its customers, sources say",
+          "url": "https://www.theglobeandmail.com/business/article-us-justice-department-did-not-open-probe-into-jensen-huang-nvidia/"
+        },
         {
           "title": "CNBC: Vance says he was assured Jensen Huang was not under DOJ investigation",
           "url": "https://www.cnbc.com/2026/11/25/vance-jensen-huang-nvidia-doj-investigation.html"
@@ -20,10 +24,6 @@
         {
           "title": "NVIDIA 8-K press release: Board reinstates Jen-Hsun Huang as CEO (Nov 23, 2026)",
           "url": "https://www.sec.gov/Archives/edgar/data/0001045810/000104581026000090/nov23pressrelease.htm"
-        },
-        {
-          "title": "CNN: Nvidia shares soar 30% after board reinstates Jensen Huang under Trump pressure",
-          "url": "https://www.cnn.com/2026/11/23/business/live-news/jensen-huang-reinstated-as-ceo-of-nvidia"
         }
       ]
     },
@@ -33,7 +33,7 @@
       "headline": "Blaize to restate FY2025 and several quarters over misstated China revenue amid DOJ and SEC subpoenas",
       "summary": "Blaize's audit committee concluded on Nov 23 that its FY2025 financial statements and several quarterly reports should no longer be relied upon, citing misstated revenue mainly from customers in China. The company, certain employees and board members have received DOJ and SEC subpoenas, and a board special committee is running an internal investigation; the size of the adjustment and the restatement timing are not yet known.",
       "first_seen": "2026-11-25",
-      "last_confirmed": "2026-11-27",
+      "last_confirmed": "2026-11-28",
       "sources": [
         {
           "title": "Blaize Holdings 8-K: Non-reliance on previously issued financial statements (Nov 23, 2026)",
